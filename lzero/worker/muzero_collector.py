@@ -411,7 +411,7 @@ class MuZeroCollector(ISerialCollector):
                 # Policy Forward Pass
                 # ==============================================================
                 policy_input = {
-                    'x': stack_obs_tensor,
+                    'data': stack_obs_tensor,
                     'action_mask': action_mask,
                     'temperature': temperature,
                     'to_play': to_play,
