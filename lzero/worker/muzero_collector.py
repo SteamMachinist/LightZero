@@ -340,6 +340,7 @@ class MuZeroCollector(ISerialCollector):
 
         # --- Initializations ---
         collected_episode = 0
+        collected_step = 0
         env_nums = self._env_num
         retry_waiting_time = 0.05
 
