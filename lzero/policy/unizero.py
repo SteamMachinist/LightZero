@@ -31,15 +31,19 @@ def scale_module_weights_vectorized(module: torch.nn.Module, scale_factor: float
     """
     if not (0.0 < scale_factor < 1.0):
         return  # Do nothing if the scaling factor is invalid
+    
+    trainable_params = [p for p in module.parameters() if p.requires_grad]
+    if not trainable_params:
+        return
 
     # 1. Flatten all parameters of the module into a single vector
-    params_vec = parameters_to_vector(module.parameters())
+    params_vec = parameters_to_vector(trainable_params)
 
     # 2. Perform multiplication operation on this vector
     params_vec.data.mul_(scale_factor)
 
     # 3. Copy the scaled vector back to the individual parameters of the module
-    vector_to_parameters(params_vec, module.parameters())
+    vector_to_parameters(params_vec, trainable_params)
 
 
 def configure_optimizer_unizero(model, learning_rate, weight_decay, device_type, betas):
@@ -1117,7 +1121,7 @@ class UniZeroPolicy(MuZeroPolicy):
             # ===================== END: Dynamically calculate current Clip threshold =====================
 
             # 1. Encoder-Clip (using dynamically calculated current_clip_value)
-            if current_clip_value > 0 and 'obs_embeddings' in losses.intermediate_losses:
+            if self.use_encoder_clip_annealing and current_clip_value > 0 and 'obs_embeddings' in losses.intermediate_losses:
                 obs_embeddings = losses.intermediate_losses['obs_embeddings']
                 if obs_embeddings is not None:
                     max_latent_norm = obs_embeddings.norm(p=2, dim=-1).max()
@@ -1466,13 +1470,13 @@ class UniZeroPolicy(MuZeroPolicy):
 
             # This logic is a temporary workaround specific to the muzero_segment_collector.
             if active_collect_env_num < self.collector_env_num:
-                # When an environment finishes an episode ('done'), the length of `self.last_batch_obs` passed back
+                # When an environment finishes an episode ('done'), the length of `self.last_batch_obs_collect` passed back
                 # becomes smaller than the total number of collector environments.
                 # Handling this dynamic batch size is complex, as the transformer's KV cache retrieval
                 # requires a stable environment ID for correct indexing. A mismatch would cause retrieval errors.
                 #
                 # Therefore, as a simpler solution, we reset the collection state for ALL environments.
-                # By resetting `self.last_batch_action` to -1 for all `self.collector_env_num` environments,
+                # By resetting `self.last_batch_action_collect` to -1 for all `self.collector_env_num` environments,
                 # we force the transformer to start its context from scratch, avoiding incorrect cache lookups.
                 logging.info('========== collect_forward ============')
                 logging.info(f'An environment has finished. Active envs: {active_collect_env_num} < Total envs: {self.collector_env_num}. Resetting all.')
@@ -1505,13 +1509,13 @@ class UniZeroPolicy(MuZeroPolicy):
         self.evaluator_env_num = self._cfg.evaluator_env_num
 
         if self._cfg.model.model_type == 'conv':
-            self.last_batch_obs_eval = torch.zeros([self.collector_env_num, self._cfg.model.observation_shape[0], 64, 64]).to(self._cfg.device)
-            self.last_batch_action_eval = [-1 for i in range(self.collector_env_num)]
+            self.last_batch_obs_eval = torch.zeros([self.evaluator_env_num, self._cfg.model.observation_shape[0], 64, 64]).to(self._cfg.device)
+            self.last_batch_action_eval = [-1 for i in range(self.evaluator_env_num)]
         elif self._cfg.model.model_type == 'mlp':
             self.last_batch_obs_eval = torch.full(
-                [self.collector_env_num, self._cfg.model.observation_shape], fill_value=self.pad_token_id,
+                [self.evaluator_env_num, self._cfg.model.observation_shape], fill_value=self.pad_token_id,
             ).to(self._cfg.device)
-            self.last_batch_action_eval = [-1 for i in range(self.collector_env_num)]
+            self.last_batch_action_eval = [-1 for i in range(self.evaluator_env_num)]
 
     def _forward_eval(self, data: torch.Tensor, action_mask: list, to_play: int = -1,
                       ready_env_id: np.array = None, timestep: List = [0], task_id: int = None,) -> Dict:
